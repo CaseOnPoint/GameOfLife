@@ -1,0 +1,30 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug GameOfLife",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/x64/Debug/GameOfLife.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/x64/Debug",
+            "environment": [],
+            "console": "externalTerminal",
+            "preLaunchTask": "build"
+        },
+        {
+            "name": "Release GameOfLife",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/x64/Release/GameOfLife.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/x64/Release",
+            "environment": [],
+            "console": "externalTerminal",
+            "preLaunchTask": "build-release"
+        }
+    ]
+}
+
