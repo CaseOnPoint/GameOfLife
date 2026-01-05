@@ -5,8 +5,9 @@
 struct InputManager
 {
 	Grid& grid;
+	sf::RenderWindow& window;
 
-	InputManager(Grid& grid) : grid(grid)
+	InputManager(Grid& grid, sf::RenderWindow& win) : grid(grid), window(win)
 	{
 	}
 
@@ -16,10 +17,9 @@ struct InputManager
 		{
 			if (event.mouseButton.button == sf::Mouse::Left)
 			{
-				int mouseX = event.mouseButton.x;
-				int mouseY = event.mouseButton.y;
-
-				handleMouseClick(mouseX, mouseY);
+				// Convert screen coordinates to view coordinates using the window's current view
+				sf::Vector2f worldPos = window.mapPixelToCoords(sf::Vector2i(event.mouseButton.x, event.mouseButton.y));
+				handleMouseClick(static_cast<int>(worldPos.x), static_cast<int>(worldPos.y));
 			}
 		}
 		
@@ -32,11 +32,16 @@ struct InputManager
 
 	void handleMouseClick(int mouseX, int mouseY)
 	{
-		// calc cell indices based on mouse coords
+		// calc cell indices based on mouse coords in view space
 		int rowIdx = mouseX / tileSize;
 		int colIdx = mouseY / tileSize;
 
-		grid.tiles[rowIdx][colIdx].toggleState();
+		// Clamp to valid grid bounds to prevent out-of-range access
+		if (rowIdx >= 0 && rowIdx < static_cast<int>(grid.tiles.size()) &&
+		    colIdx >= 0 && colIdx < static_cast<int>(grid.tiles[rowIdx].size()))
+		{
+			grid.tiles[rowIdx][colIdx].toggleState();
+		}
 	}
 
 	void handleKeyPress(sf::Keyboard::Key keyCode)
@@ -46,6 +51,14 @@ struct InputManager
 			// pause & unpause the grid update 
 			case sf::Keyboard::Space:
 				grid.gamePaused = !grid.gamePaused;
+				break;
+			// restart/reset the simulation with random pattern
+			case sf::Keyboard::R:
+				grid.reset();
+				break;
+			// restart/reset the simulation with symmetrical pattern
+			case sf::Keyboard::G:
+				grid.resetSymmetrical();
 				break;
 		}
 	}

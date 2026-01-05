@@ -4,6 +4,8 @@
 #include <vector>
 #include <iostream>
 #include <random>
+#include <future>
+#include <thread>
 
 // TODO
 // should communicate with game and tile
@@ -25,60 +27,83 @@ struct Grid
 		setRandomLiveTiles();
 	}
 
+	void updateChunk(size_t startRow, size_t endRow, std::vector<std::vector<Tile>>& tilesCopy)
+	{
+		// Process a chunk of rows - optimized version
+		size_t maxRow = tiles.size() - 1;
+		size_t maxCol = tiles[0].size() - 1;
+		
+		for (size_t i = startRow; i < endRow && i < maxRow; i++) {
+			for (size_t j = 0; j < maxCol; j++) {
+				const Tile& tile = tiles[i][j];
+				Tile& newTile = tilesCopy[i][j];
+
+				// Optimized: count neighbors directly without vector allocation
+				int numLivingNeighbors = countLivingNeighbors(i, j);
+				
+				// Apply the rules of the Game of Life
+				if (tile.isAlive) 
+				{
+					if (numLivingNeighbors < 2 || numLivingNeighbors > 3) 
+					{
+						newTile.setDead();
+					}
+				}
+				else
+				{
+					if (numLivingNeighbors == 3)
+					{
+						newTile.setAlive();
+					}
+				}
+			}
+		}
+	}
+
 	void update()
 	{
-		// iterate through all tiles
-		// check each rule for each tile 
-		// change states of each tile
 		if (!gamePaused) {
 			// copy grid to achieve simultaneous state changes 
 			std::vector<std::vector<Tile>> tilesCopy = tiles;
 
-			for (size_t i = 0; i < tiles.size() - 1; i++) {
-				for (size_t j = 0; j < tiles.size() - 1; j++) {
-					Tile& tile = tiles[i][j]; // use & to ensure the tile is not a copy, since we edit the tiles directly
-					Tile& newTile = tilesCopy[i][j];
-
-					std::vector<Tile> neighbors = getTileNeighbors(i, j); // get its neighbors
-					int numLivingNeighbors = 0;
-
-					// iterate through 8 surrounding neighbor tiles
-					// to get the number of living tiles near the current tile
-					for (Tile& neighbor : neighbors)
-					{
-						if (neighbor.isAlive)
-						{
-							numLivingNeighbors++;
-						}
-					}
-					// Apply the rules of the Game of Life
-					if (tile.isAlive) 
-					{
-						if (numLivingNeighbors < 2 || numLivingNeighbors > 3) 
-						{
-							// Any live cell with fewer than two live neighbors dies (underpopulation)
-							// Any live cell with more than three live neighbors dies (overpopulation)
-							newTile.setDead();
-						}
-					}
-					else
-					{
-						if (numLivingNeighbors == 3)
-						{
-							// Any dead cell with exactly three live neighbors becomes a live cell (reproduction)
-							newTile.setAlive();
-						}
-					}
-				}
+			// Use async for better thread management (reuses thread pool)
+			size_t totalRows = tiles.size() - 1; // Skip last row
+			unsigned int numThreads = std::thread::hardware_concurrency();
+			if (numThreads == 0) numThreads = 4;
+			// For 10 cores, use all of them but ensure reasonable chunk size
+			size_t minChunkSize = 10; // Minimum rows per thread
+			if (totalRows / numThreads < minChunkSize) {
+				numThreads = static_cast<unsigned int>(totalRows / minChunkSize);
+				if (numThreads == 0) numThreads = 1;
 			}
+			
+			size_t rowsPerThread = totalRows / numThreads;
+			std::vector<std::future<void>> futures;
+			
+			// Launch async tasks for each chunk
+			for (unsigned int t = 0; t < numThreads; t++)
+			{
+				size_t startRow = t * rowsPerThread;
+				size_t endRow = (t == numThreads - 1) ? totalRows : (t + 1) * rowsPerThread;
+				
+				futures.push_back(std::async(std::launch::async, 
+					&Grid::updateChunk, this, startRow, endRow, std::ref(tilesCopy)));
+			}
+			
+			// Wait for all tasks to complete
+			for (auto& future : futures)
+			{
+				future.wait();
+			}
+			
 			tiles = tilesCopy; // set all state changes at the same time
 		}
 	}
 
-	std::vector<Tile> getTileNeighbors(size_t i, size_t j)
+	// Optimized: count neighbors directly without vector allocation
+	int countLivingNeighbors(size_t i, size_t j)
 	{
-		std::vector<Tile> neighbors;
-
+		int count = 0;
 		// iterate over neighboring indices
 		for (int xOffset = -1; xOffset <= 1; xOffset++)
 		{
@@ -87,15 +112,16 @@ struct Grid
 				if (xOffset == 0 && yOffset == 0) continue; // skip current tile
 
 				// calculate neighbor indices with wrap-around
-				// remove the -1's and turn on random tiles for the edge glitch which produces interesting fractal designs
 				int neighborI = (static_cast<int>(i) + xOffset + totalGridTiles) % (totalGridTiles);
 				int neighborJ = (static_cast<int>(j) + yOffset + totalGridTiles) % (totalGridTiles);
 
-				// add the wrapped-around neighbor to the list
-				neighbors.push_back(tiles[neighborI][neighborJ]);
+				if (tiles[neighborI][neighborJ].isAlive)
+				{
+					count++;
+				}
 			}
 		}
-		return neighbors;
+		return count;
 	}
 
 	void generateGridOfDeadTiles()
@@ -132,5 +158,108 @@ struct Grid
 				}
 			}
 		}
+	}
+
+	void setSymmetricalEdgeTiles()
+	{
+		// Mirror the original setRandomLiveTiles() exactly, but with 4-way symmetry
+		// Generate random pattern in one quadrant, then mirror to all 4 quadrants
+		// Run 10 times like the original to create dense pattern
+		for (int iteration = 0; iteration < 10; iteration++) {
+			// get random starting indices (new generator each iteration like original)
+			std::random_device rd;
+			std::mt19937 gen(rd());
+			std::uniform_int_distribution<> dis(0, 100);
+
+			int threshold = 60; // Same threshold as original
+			int centerX = totalGridTiles / 2;
+			int centerY = totalGridTiles / 2;
+
+			// Generate random pattern in the top-left quadrant, then mirror to all 4
+			for (int i = 0; i < centerX; i++)
+			{
+				for (int j = 0; j < centerY; j++)
+				{
+					int val = dis(gen);
+					if (val > threshold)
+					{
+						// Set tile in all 4 quadrants for symmetry (mirroring the original's full grid generation)
+						tiles[i][j].setAlive();                                    // Top-left
+						tiles[totalGridTiles - 1 - i][j].setAlive();              // Top-right (mirror horizontally)
+						tiles[i][totalGridTiles - 1 - j].setAlive();               // Bottom-left (mirror vertically)
+						tiles[totalGridTiles - 1 - i][totalGridTiles - 1 - j].setAlive(); // Bottom-right (mirror both)
+					}
+				}
+			}
+			
+			// Handle center lines if grid size is odd (mirror original's full grid approach)
+			if (totalGridTiles % 2 == 1)
+			{
+				// Horizontal center line
+				for (int i = 0; i < centerX; i++)
+				{
+					int val = dis(gen);
+					if (val > threshold)
+					{
+						tiles[i][centerY].setAlive();
+						tiles[totalGridTiles - 1 - i][centerY].setAlive();
+					}
+				}
+				
+				// Vertical center line
+				for (int j = 0; j < centerY; j++)
+				{
+					int val = dis(gen);
+					if (val > threshold)
+					{
+						tiles[centerX][j].setAlive();
+						tiles[centerX][totalGridTiles - 1 - j].setAlive();
+					}
+				}
+				
+				// Center tile
+				int val = dis(gen);
+				if (val > threshold)
+				{
+					tiles[centerX][centerY].setAlive();
+				}
+			}
+		}
+	}
+
+	void reset()
+	{
+		// Clear all tiles (set them to dead)
+		for (size_t i = 0; i < tiles.size(); i++)
+		{
+			for (size_t j = 0; j < tiles[i].size(); j++)
+			{
+				tiles[i][j].setDead();
+			}
+		}
+		
+		// Reset pause state
+		gamePaused = true;
+		
+		// Generate new random live tiles
+		setRandomLiveTiles();
+	}
+
+	void resetSymmetrical()
+	{
+		// Clear all tiles (set them to dead)
+		for (size_t i = 0; i < tiles.size(); i++)
+		{
+			for (size_t j = 0; j < tiles[i].size(); j++)
+			{
+				tiles[i][j].setDead();
+			}
+		}
+		
+		// Reset pause state
+		gamePaused = true;
+		
+		// Generate new symmetrical random tiles on edges only
+		setSymmetricalEdgeTiles();
 	}
 };
