@@ -9,11 +9,37 @@ struct Renderer
 {
     sf::RenderWindow& window;
     Grid& grid;
+    bool colorGradientEnabled = true; // Color gradients on by default
+    
+    // For large mode: use image-based rendering (much faster for 1-pixel tiles)
+    sf::Image pixelImage;
+    sf::Texture pixelTexture;
+    sf::Sprite pixelSprite;
+    bool imageInitialized = false;
+    bool forceFullUpdate = false; // Force full pixel update (e.g., when gradient is toggled)
 
     // Render Window is non-copyable so pass it by reference
     // and use an initialization list before the constructor executes
     Renderer(sf::RenderWindow& win, Grid& grid) : window(win), grid(grid)
     {
+    }
+    
+    void initializeImageRendering()
+    {
+        if (!imageInitialized && grid.largeMode)
+        {
+            int gridSize = static_cast<int>(grid.tiles.size());
+            pixelImage.create(gridSize, gridSize, sf::Color::Black);
+            pixelTexture.create(gridSize, gridSize);
+            imageInitialized = true;
+        }
+    }
+
+    void toggleColorGradient()
+    {
+        colorGradientEnabled = !colorGradientEnabled;
+        // Force full update on next render (all pixels need new colors)
+        forceFullUpdate = true;
     }
 
     void render()
@@ -26,29 +52,7 @@ struct Renderer
     void renderGrid()
     {
         window.clear(sf::Color::Black);
-
-        // Use fixed game dimensions instead of window size to prevent scaling issues
-        const int numLinesX = gameWidth / tileSize + 1;
-        const int numLinesY = gameHeight / tileSize + 1;
-        const int totalVertices = 2 * (numLinesX + numLinesY);
-
-        sf::VertexArray lines(sf::Lines, totalVertices);
-        int index = 0;
-
-        // horizontal lines - use fixed gameHeight
-        for (int i = 0; i <= gameHeight; i += tileSize)
-        {
-            lines[index++] = sf::Vertex(sf::Vector2f(0.0f, static_cast<float>(i)), sf::Color(255, 255, 255, 255));
-            lines[index++] = sf::Vertex(sf::Vector2f(static_cast<float>(gameWidth), static_cast<float>(i)), sf::Color(255, 255, 255, 255));
-        }
-
-        // vertical lines - use fixed gameWidth
-        for (int i = 0; i <= gameWidth; i += tileSize)
-        {
-            lines[index++] = sf::Vertex(sf::Vector2f(static_cast<float>(i), 0.0f), sf::Color(255, 255, 255, 255));
-            lines[index++] = sf::Vertex(sf::Vector2f(static_cast<float>(i), static_cast<float>(gameHeight)), sf::Color(255, 255, 255, 255));
-        }
-        window.draw(lines);
+        // Grid lines removed - they looked bad with the dead tile optimization
     }
 
     sf::Color getColorForPosition(int x, int y, bool isAlive)
@@ -59,9 +63,17 @@ struct Renderer
             return sf::Color(0, 0, 0, 255);
         }
         
+        // If color gradients disabled, use simple white
+        if (!colorGradientEnabled)
+        {
+            return sf::Color(255, 255, 255, 255);
+        }
+        
         // Calculate distance from center for symmetrical radial gradient
-        float centerX = static_cast<float>(totalGridTiles) / 2.0f;
-        float centerY = static_cast<float>(totalGridTiles) / 2.0f;
+        // Use actual grid size (supports both normal and large mode)
+        int gridSize = static_cast<int>(grid.tiles.size());
+        float centerX = static_cast<float>(gridSize) / 2.0f;
+        float centerY = static_cast<float>(gridSize) / 2.0f;
         
         float dx = static_cast<float>(x) - centerX;
         float dy = static_cast<float>(y) - centerY;
@@ -120,33 +132,96 @@ struct Renderer
 
     void renderTiles() 
     {
-        // create vector of square objects for batch drawing optimization
-        sf::VertexArray squares(sf::Triangles);
-
-        for (size_t i = 0; i < grid.tiles.size(); i++)
+        // Get effective tile size (1 for large mode, 7 for normal)
+        int effectiveTileSize = grid.largeMode ? 1 : tileSize;
+        
+        if (grid.largeMode)
         {
-            for (size_t j = 0; j < grid.tiles[i].size(); j++)
+            // Optimized rendering for large mode: use image-based pixel rendering with dirty tracking
+            initializeImageRendering();
+            
+            // Force full update if gradient was toggled or if no changes tracked
+            if (forceFullUpdate || grid.changedTiles.empty())
             {
-                // extract tile from vector-based grid
-                Tile& tile = grid.tiles[i][j];
-
-                float x = static_cast<float>(tile.x * tileSize);
-                float y = static_cast<float>(tile.y * tileSize);
-
-                // Get color based on position for gradient effect
-                sf::Color tileColor = getColorForPosition(tile.x, tile.y, tile.isAlive);
-
-                // define vertices of the square with gradient color
-                squares.append(sf::Vertex(sf::Vector2f(x, y), tileColor));
-                squares.append(sf::Vertex(sf::Vector2f(x + tileSize, y), tileColor));
-                squares.append(sf::Vertex(sf::Vector2f(x, y + tileSize), tileColor));
-
-                squares.append(sf::Vertex(sf::Vector2f(x + tileSize, y), tileColor));
-                squares.append(sf::Vertex(sf::Vector2f(x + tileSize, y + tileSize), tileColor));
-                squares.append(sf::Vertex(sf::Vector2f(x, y + tileSize), tileColor));
+                // Update all pixels (first frame, no changes, or gradient toggled)
+                int gridSize = static_cast<int>(grid.tiles.size());
+                for (int i = 0; i < gridSize; i++)
+                {
+                    for (int j = 0; j < gridSize; j++)
+                    {
+                        const Tile& tile = grid.tiles[i][j];
+                        if (tile.isAlive)
+                        {
+                            sf::Color tileColor = getColorForPosition(tile.x, tile.y, true);
+                            pixelImage.setPixel(j, i, tileColor);
+                        }
+                        else
+                        {
+                            pixelImage.setPixel(j, i, sf::Color::Black);
+                        }
+                    }
+                }
+                forceFullUpdate = false; // Reset flag after full update
             }
+            else
+            {
+                // Use dirty tracking: only update pixels that changed (huge performance boost!)
+                for (const auto& pos : grid.changedTiles)
+                {
+                    int i = pos.first;
+                    int j = pos.second;
+                    const Tile& tile = grid.tiles[i][j];
+                    
+                    if (tile.isAlive)
+                    {
+                        sf::Color tileColor = getColorForPosition(tile.x, tile.y, true);
+                        pixelImage.setPixel(j, i, tileColor); // Note: setPixel uses (x, y) = (col, row)
+                    }
+                    else
+                    {
+                        pixelImage.setPixel(j, i, sf::Color::Black);
+                    }
+                }
+            }
+            
+            // Update texture and draw
+            pixelTexture.update(pixelImage);
+            pixelSprite.setTexture(pixelTexture);
+            pixelSprite.setScale(1.0f, 1.0f); // 1:1 pixel mapping
+            window.draw(pixelSprite);
         }
-        // draw square on line-based grid based on position in vector-based grid
-        window.draw(squares);
+        else
+        {
+            // Normal mode: use vertex arrays (optimized - skip dead tiles)
+            sf::VertexArray squares(sf::Triangles);
+
+            for (size_t i = 0; i < grid.tiles.size(); i++)
+            {
+                for (size_t j = 0; j < grid.tiles[i].size(); j++)
+                {
+                    const Tile& tile = grid.tiles[i][j];
+                    
+                    // Skip dead tiles (background is already black)
+                    if (!tile.isAlive) continue;
+
+                    float x = static_cast<float>(tile.x * effectiveTileSize);
+                    float y = static_cast<float>(tile.y * effectiveTileSize);
+
+                    // Get color based on position for gradient effect
+                    sf::Color tileColor = getColorForPosition(tile.x, tile.y, true);
+
+                    // define vertices of the square with gradient color
+                    squares.append(sf::Vertex(sf::Vector2f(x, y), tileColor));
+                    squares.append(sf::Vertex(sf::Vector2f(x + effectiveTileSize, y), tileColor));
+                    squares.append(sf::Vertex(sf::Vector2f(x, y + effectiveTileSize), tileColor));
+
+                    squares.append(sf::Vertex(sf::Vector2f(x + effectiveTileSize, y), tileColor));
+                    squares.append(sf::Vertex(sf::Vector2f(x + effectiveTileSize, y + effectiveTileSize), tileColor));
+                    squares.append(sf::Vertex(sf::Vector2f(x, y + effectiveTileSize), tileColor));
+                }
+            }
+            // draw square on line-based grid based on position in vector-based grid
+            window.draw(squares);
+        }
     }
 };
