@@ -171,7 +171,7 @@ struct Grid
 		// Use actual grid size (supports both normal and large mode)
 		int gridSize = static_cast<int>(tiles.size());
 		
-		// iterate over neighboring indices
+		// iterate over neighboring indices (3x3 neighborhood)
 		for (int xOffset = -1; xOffset <= 1; xOffset++)
 		{
 			for (int yOffset = -1; yOffset <= 1; yOffset++)
@@ -472,5 +472,280 @@ struct Grid
 		
 		// Generate density gradient with embedded structures
 		setDensityGradientWithStructures();
+	}
+
+	void placeGliderGun(int startX, int startY, int direction)
+	{
+		// Gosper Glider Gun pattern
+		// Direction: 0=right, 1=down, 2=left, 3=up
+		// Pattern is 36x9 cells, fires gliders every 30 generations
+		
+		int gridSize = static_cast<int>(tiles.size());
+		
+		// Base glider gun pattern (firing to the right)
+		// This is a simplified/compact version of the Gosper glider gun
+		int gunPattern[][2] = {
+			// Left square
+			{0, 4}, {0, 5}, {1, 4}, {1, 5},
+			// Right square  
+			{10, 4}, {10, 5}, {10, 6}, {11, 3}, {11, 7},
+			{12, 2}, {12, 8}, {13, 2}, {13, 8},
+			{14, 5}, {15, 3}, {15, 7},
+			{16, 4}, {16, 5}, {16, 6}, {17, 5},
+			// Left part
+			{20, 2}, {20, 3}, {20, 4}, {21, 2}, {21, 3}, {21, 4},
+			{22, 1}, {22, 5}, {24, 0}, {24, 1}, {24, 5}, {24, 6},
+			// Right part
+			{34, 2}, {34, 3}, {35, 2}, {35, 3}
+		};
+		
+		int patternSize = sizeof(gunPattern) / sizeof(gunPattern[0]);
+		
+		for (int p = 0; p < patternSize; p++)
+		{
+			int x = gunPattern[p][0];
+			int y = gunPattern[p][1];
+			int finalX, finalY;
+			
+			// Rotate pattern based on direction
+			if (direction == 0) // Right
+			{
+				finalX = startX + x;
+				finalY = startY + y;
+			}
+			else if (direction == 1) // Down
+			{
+				finalX = startX + y;
+				finalY = startY + x;
+			}
+			else if (direction == 2) // Left
+			{
+				finalX = startX - x;
+				finalY = startY + y;
+			}
+			else // Up
+			{
+				finalX = startX + y;
+				finalY = startY - x;
+			}
+			
+			if (finalX >= 0 && finalX < gridSize && finalY >= 0 && finalY < gridSize)
+			{
+				tiles[finalY][finalX].setAlive();
+			}
+		}
+	}
+
+	void setGliderGunArrays()
+	{
+		// Place multiple glider guns at edges firing inward
+		int gridSize = static_cast<int>(tiles.size());
+		int spacing = 100; // Space between guns
+		
+		// Top edge - guns firing down
+		for (int x = 50; x < gridSize - 50; x += spacing)
+		{
+			placeGliderGun(x, 10, 1); // direction 1 = down
+		}
+		
+		// Bottom edge - guns firing up
+		for (int x = 50; x < gridSize - 50; x += spacing)
+		{
+			placeGliderGun(x, gridSize - 50, 3); // direction 3 = up
+		}
+		
+		// Left edge - guns firing right
+		for (int y = 50; y < gridSize - 50; y += spacing)
+		{
+			placeGliderGun(10, y, 0); // direction 0 = right
+		}
+		
+		// Right edge - guns firing left
+		for (int y = 50; y < gridSize - 50; y += spacing)
+		{
+			placeGliderGun(gridSize - 50, y, 2); // direction 2 = left
+		}
+	}
+
+	void resetGliderGunArrays()
+	{
+		// Clear all tiles
+		for (size_t i = 0; i < tiles.size(); i++)
+		{
+			for (size_t j = 0; j < tiles[i].size(); j++)
+			{
+				tiles[i][j].setDead();
+			}
+		}
+		
+		// Reset pause state
+		gamePaused = true;
+		
+		// Generate glider gun arrays
+		setGliderGunArrays();
+	}
+
+	void setConcentricDensityRings()
+	{
+		// Create concentric rings of high density that create wavefronts
+		int gridSize = static_cast<int>(tiles.size());
+		int centerX = gridSize / 2;
+		int centerY = gridSize / 2;
+		float maxDistance = std::sqrt(static_cast<float>(centerX * centerX + centerY * centerY));
+		
+		std::random_device rd;
+		std::mt19937 gen(rd());
+		std::uniform_int_distribution<> dis(0, 100);
+		
+		// Create rings at regular intervals
+		int numRings = 15; // Number of concentric rings
+		float ringSpacing = maxDistance / (numRings + 1);
+		
+		for (int i = 0; i < gridSize; i++)
+		{
+			for (int j = 0; j < gridSize; j++)
+			{
+				// Calculate distance from center
+				float dx = static_cast<float>(i) - centerX;
+				float dy = static_cast<float>(j) - centerY;
+				float distance = std::sqrt(dx * dx + dy * dy);
+				
+				// Determine which ring this position is in
+				int ringIndex = static_cast<int>(distance / ringSpacing);
+				float ringPosition = std::fmod(static_cast<float>(distance), static_cast<float>(ringSpacing));
+				
+				// High density on ring edges (within 2-3 cells of ring boundary)
+				float ringThickness = ringSpacing * 0.15f; // 15% of ring spacing is the ring thickness
+				bool isOnRing = ringPosition < ringThickness || ringPosition > (ringSpacing - ringThickness);
+				
+				// Density: 85% on rings, 15% between rings
+				int threshold = isOnRing ? 15 : 85; // Lower threshold = higher density
+				
+				int val = dis(gen);
+				if (val < threshold)
+				{
+					tiles[i][j].setAlive();
+				}
+			}
+		}
+	}
+
+	void resetConcentricDensityRings()
+	{
+		// Clear all tiles
+		for (size_t i = 0; i < tiles.size(); i++)
+		{
+			for (size_t j = 0; j < tiles[i].size(); j++)
+			{
+				tiles[i][j].setDead();
+			}
+		}
+		
+		// Reset pause state
+		gamePaused = true;
+		
+		// Generate concentric density rings
+		setConcentricDensityRings();
+	}
+
+	void placeRPentomino(int centerX, int centerY)
+	{
+		// R-pentomino pattern - known to explode and grow chaotically
+		// Pattern (relative to center):
+		//   X X
+		// X X
+		//   X
+		int gridSize = static_cast<int>(tiles.size());
+		
+		int pattern[][2] = {
+			{0, 0}, {1, 0},  // Top row
+			{-1, 1}, {0, 1},  // Middle row
+			{0, 2}            // Bottom
+		};
+		
+		int patternSize = sizeof(pattern) / sizeof(pattern[0]);
+		
+		for (int p = 0; p < patternSize; p++)
+		{
+			int x = centerX + pattern[p][0];
+			int y = centerY + pattern[p][1];
+			
+			if (x >= 0 && x < gridSize && y >= 0 && y < gridSize)
+			{
+				tiles[y][x].setAlive();
+			}
+		}
+	}
+
+	void setExplosiveSeeds()
+	{
+		// Place r-pentomino patterns at strategic locations
+		// These explode and create large-scale chaotic growth
+		int gridSize = static_cast<int>(tiles.size());
+		int centerX = gridSize / 2;
+		int centerY = gridSize / 2;
+		
+		// Place seeds in a grid pattern across the board
+		int spacing = 150; // Space between seeds
+		int offset = 100;  // Offset from edges
+		
+		// Create a grid of explosive seeds
+		for (int x = offset; x < gridSize - offset; x += spacing)
+		{
+			for (int y = offset; y < gridSize - offset; y += spacing)
+			{
+				placeRPentomino(x, y);
+			}
+		}
+		
+		// Also place some seeds at edges to create cascading effects
+		// Top edge
+		for (int x = 50; x < gridSize - 50; x += spacing * 2)
+		{
+			placeRPentomino(x, 50);
+		}
+		
+		// Bottom edge
+		for (int x = 50; x < gridSize - 50; x += spacing * 2)
+		{
+			placeRPentomino(x, gridSize - 50);
+		}
+		
+		// Left edge
+		for (int y = 50; y < gridSize - 50; y += spacing * 2)
+		{
+			placeRPentomino(50, y);
+		}
+		
+		// Right edge
+		for (int y = 50; y < gridSize - 50; y += spacing * 2)
+		{
+			placeRPentomino(gridSize - 50, y);
+		}
+		
+		// Place a few extra seeds near center for more chaos
+		placeRPentomino(centerX, centerY);
+		placeRPentomino(centerX + 200, centerY);
+		placeRPentomino(centerX - 200, centerY);
+		placeRPentomino(centerX, centerY + 200);
+		placeRPentomino(centerX, centerY - 200);
+	}
+
+	void resetExplosiveSeeds()
+	{
+		// Clear all tiles
+		for (size_t i = 0; i < tiles.size(); i++)
+		{
+			for (size_t j = 0; j < tiles[i].size(); j++)
+			{
+				tiles[i][j].setDead();
+			}
+		}
+		
+		// Reset pause state
+		gamePaused = true;
+		
+		// Generate explosive seeds
+		setExplosiveSeeds();
 	}
 };

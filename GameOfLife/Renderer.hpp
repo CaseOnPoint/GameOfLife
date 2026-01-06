@@ -11,6 +11,9 @@ struct Renderer
     Grid& grid;
     bool colorGradientEnabled = true; // Color gradients on by default
     
+    // Make colorGradientEnabled accessible
+    friend struct Game;
+    
     // For large mode: use image-based rendering (much faster for 1-pixel tiles)
     sf::Image pixelImage;
     sf::Texture pixelTexture;

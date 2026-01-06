@@ -62,6 +62,8 @@ struct Game
             renderer->toggleColorGradient();
         }
     }
+    
+    Renderer* getRenderer() { return renderer; }
 
     void toggleLargeMode()
     {
@@ -121,28 +123,78 @@ inline void InputManager::handleKeyPress(sf::Keyboard::Key keyCode)
 		// pause & unpause the grid update 
 		case sf::Keyboard::Space:
 			grid.gamePaused = !grid.gamePaused;
+			std::cout << ">>> Simulation " << (grid.gamePaused ? "PAUSED" : "RUNNING") << std::endl;
 			break;
 		// restart/reset the simulation with random pattern
 		case sf::Keyboard::R:
+			std::cout << ">>> Resetting with random pattern..." << std::endl;
 			grid.reset();
 			break;
 		// restart/reset the simulation with symmetrical pattern
 		case sf::Keyboard::G:
+			std::cout << ">>> Resetting with symmetrical edge pattern..." << std::endl;
 			grid.resetSymmetrical();
 			break;
 		// toggle color gradients on/off
 		case sf::Keyboard::C:
 			game.toggleColorGradient();
+			{
+				Renderer* r = game.getRenderer();
+				std::cout << ">>> Color gradients " << (r && r->colorGradientEnabled ? "ENABLED" : "DISABLED") << std::endl;
+			}
 			break;
 		// toggle large mode (10x size)
 		case sf::Keyboard::L:
+			std::cout << ">>> Toggling large mode..." << std::endl;
 			game.toggleLargeMode();
+			std::cout << ">>> Large mode " << (grid.largeMode ? "ENABLED" : "DISABLED") << std::endl;
 			break;
 		// density gradient with structures (large mode only)
 		case sf::Keyboard::Num1:
 			if (grid.largeMode)
 			{
+				std::cout << ">>> Generating density gradient with embedded structures..." << std::endl;
 				grid.resetDensityGradient();
+			}
+			else
+			{
+				std::cout << ">>> Large mode required for this pattern. Press 'L' to enable." << std::endl;
+			}
+			break;
+		// glider gun arrays (large mode only)
+		case sf::Keyboard::Num2:
+			if (grid.largeMode)
+			{
+				std::cout << ">>> Generating glider gun arrays at edges..." << std::endl;
+				grid.resetGliderGunArrays();
+			}
+			else
+			{
+				std::cout << ">>> Large mode required for this pattern. Press 'L' to enable." << std::endl;
+			}
+			break;
+		// concentric density rings (large mode only)
+		case sf::Keyboard::Num3:
+			if (grid.largeMode)
+			{
+				std::cout << ">>> Generating concentric density rings..." << std::endl;
+				grid.resetConcentricDensityRings();
+			}
+			else
+			{
+				std::cout << ">>> Large mode required for this pattern. Press 'L' to enable." << std::endl;
+			}
+			break;
+		// explosive seeds (large mode only)
+		case sf::Keyboard::Num4:
+			if (grid.largeMode)
+			{
+				std::cout << ">>> Generating explosive r-pentomino seeds..." << std::endl;
+				grid.resetExplosiveSeeds();
+			}
+			else
+			{
+				std::cout << ">>> Large mode required for this pattern. Press 'L' to enable." << std::endl;
 			}
 			break;
 	}
